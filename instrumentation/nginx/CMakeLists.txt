@@ -6,8 +6,13 @@ find_package(opentelemetry-cpp REQUIRED)
 find_package(Threads REQUIRED)
 find_package(protobuf REQUIRED)
 find_package(gRPC REQUIRED)
+find_package(ppconsul REQUIRED)
 
+#set(BUILD_TESTS OFF)
+#set(BUILD_STATIC_LIB ON)
 include(${CMAKE_CURRENT_SOURCE_DIR}/nginx.cmake)
+
+#add_subdirectory(ppconsul)
 
 add_library(otel_ngx_module SHARED
   src/nginx_config.cpp
@@ -42,4 +47,5 @@ target_link_libraries(otel_ngx_module
   PRIVATE
   ${OPENTELEMETRY_CPP_LIBRARIES}
   gRPC::grpc++
+  ppconsul
 )

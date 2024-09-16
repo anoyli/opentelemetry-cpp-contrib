@@ -2,6 +2,19 @@
 #include "toml.h"
 #include <algorithm>
 #include <stdlib.h>
+#include "ppconsul/kv.h"
+#include <iostream>   // std::cout
+#include <string>     // std::string, std::stod
+#include <chrono>
+
+
+using ppconsul::Consul;
+using ppconsul::Consistency;
+using namespace ppconsul::kv;
+using namespace std::chrono;
+
+
+long last_updated_time = 0;
 
 struct ScopedTable {
   ScopedTable(toml_table_t* table) : table(table) {}
@@ -9,6 +22,12 @@ struct ScopedTable {
 
   toml_table_t* table;
 };
+
+static long double curtime() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::system_clock::now().time_since_epoch()
+  ).count();
+}
 
 static std::string FromStringDatum(toml_datum_t datum) {
   std::string val{datum.u.s};
@@ -148,15 +167,46 @@ static bool SetupProcessor(toml_table_t* root, ngx_log_t* log, OtelNgxAgentConfi
   return true;
 }
 
+static double getSamplingRate(std::string cmdb, std::string cur_env, ngx_log_t* log){
+    long cur = curtime();
+    std::cout<<std::to_string(cur)<<" cur.\n";
+    std::cout<<std::to_string(last_updated_time)<<" last_updated_time.\n";
+    if((cur - last_updated_time) > 1000 * 60 * 3){
+      last_updated_time = cur;
+      std::cout<<" getSamplingRate.\n";
+      std::string cur_token = cur_env=="prod"?"4e13740e-9d65-39eb-e0c3-473397658ea6":"eb438d90-4183-06d7-0095-8e24d723c9c6";
+      std::string cur_url = cur_env == "prod"?"http://internal-ms-service-discovery-887102973.ap-northeast-2.elb.amazonaws.com/":"http://internal-ms-consul-alb-416054892.ap-northeast-2.elb.amazonaws.com:8500";
+      ppconsul::Consul consul(cur_url,kw::token=cur_token);
+      Kv kv(consul,kw::token=cur_token);
+      return stod(kv.get("hot_config/coutrace/nginx/" + cmdb , "1", kw::token=cur_token));
+    }
+    return -1.0;
+    //return 1.0;
+}
+
 static bool SetupSampler(toml_table_t* root, ngx_log_t* log, OtelNgxAgentConfig* config) {
   toml_table_t* sampler = toml_table_in(root, "sampler");
 
   if (!sampler) {
     return true;
   }
+  toml_datum_t toml_cmdb = toml_string_in(sampler, "cmdb");
+  toml_datum_t toml_env = toml_string_in(sampler, "env");
+  std::string cmdb;
+  std::string cur_env;
+  
+  if(!toml_cmdb.ok){
+    cmdb = "default";
+  } else {
+    cmdb = FromStringDatum(toml_cmdb);
+  }
 
+  if(!toml_env.ok){
+    cur_env = "dev";
+  } else {
+    cur_env = FromStringDatum(toml_env);
+  }
   toml_datum_t samplerNameVal = toml_string_in(sampler, "name");
-
   if (samplerNameVal.ok) {
     std::string samplerName = FromStringDatum(samplerNameVal);
 
@@ -170,7 +220,14 @@ static bool SetupSampler(toml_table_t* root, ngx_log_t* log, OtelNgxAgentConfig*
       toml_datum_t ratio = toml_double_in(sampler, "ratio");
 
       if (ratio.ok) {
-        config->sampler.ratio = ratio.u.d;
+        //config->sampler.ratio = ratio.u.d;
+        double ratio = getSamplingRate(cmdb, cur_env, log);
+        if(ratio != -1.0){
+          long cur = curtime();
+          config->sampler.ratio = ratio;
+        }
+        config->sampler.cmdb = cmdb;
+        config->sampler.env = cur_env;
       } else {
         ngx_log_error(NGX_LOG_ERR, log, 0, "TraceIdRatioBased requires a ratio to be specified");
         return false;

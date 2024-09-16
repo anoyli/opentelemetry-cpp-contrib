@@ -34,6 +34,8 @@ struct OtelNgxAgentConfig {
     OtelSamplerType type = OtelSamplerAlwaysOn;
     bool parentBased = false;
     double ratio = 0;
+    std::string cmdb = "default";
+    std::string env = "dev";
   } sampler;
 };
 
